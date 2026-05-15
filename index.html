@@ -3,108 +3,122 @@
 <head>
     <meta charset="UTF-8">
     <title>Texture Mapper Extension</title>
-    <!-- Last inn Trimble Connect Workspace API -->
     <script src="https://connect-extensions.trimble.com/sdk/3.0.0/trimble.connect.workspace.js"></script>
     <style>
-        body { font-family: sans-serif; padding: 15px; color: #333; }
-        .container { display: flex; flex-direction: column; gap: 10px; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background-color: #f4f4f4; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h3 { margin-top: 0; color: #0078d4; }
         button { 
-            padding: 10px; 
+            width: 100%;
+            padding: 12px; 
             background-color: #0078d4; 
             color: white; 
             border: none; 
             cursor: pointer; 
             border-radius: 4px;
+            font-weight: bold;
         }
         button:hover { background-color: #005a9e; }
-        #status { font-size: 0.9em; margin-top: 10px; color: #666; }
+        #status { margin-top: 15px; font-size: 0.85em; color: #555; line-height: 1.4; }
     </style>
 </head>
 <body>
 
-<div class="container">
+<div class="card">
     <h3>Tekstur-mapper</h3>
-    <p>Trykk på knappen for å legge teksturer på valgte objekter basert på egenskaper.</p>
-    <button id="applyTexturesBtn">Legg på teksturer</button>
-    <div id="status">Klar...</div>
+    <p>Legger tekstur på valgte objekter basert på egenskaper.</p>
+    <button id="runBtn">Kjør mapping</button>
+    <div id="status">Venter på tilkobling...</div>
 </div>
 
 <script>
     // --- KONFIGURASJON ---
-    // Erstatt med din faktiske GitHub-sti (viktig: bruk raw.githubusercontent.com)
-    const TEXTURE_BASE_URL = "https://raw.githubusercontent.com/vidmet/model-textures/main/assets/";
+    const TEXTURE_BASE_URL = "https://raw.githubusercontent.com/BRUKERNAVN/REPO/main/assets/";
 
-    // Mapping mellom egenskapsverdi og bildefil
     const textureMap = {
-        "Asfalt": "T_Asphalt05.png",
+        "Asfalt": "asfalt_dark.jpg",
         "Betong": "concrete_gray.jpg",
         "Gras": "grass_green.jpg",
-        "Stein": "stone_wall.jpg"
+        "Skog": "forest_floor.jpg"
     };
 
-    let workspace = null;
+    let API = null;
 
-    // Initialiser Trimble Connect
-    async function init() {
+    // Initialisering slik vi har gjort det i tidligere utvidelser
+    async function initializeExtension() {
         try {
-            workspace = await window.TrimbleConnectWorkspace.connect();
-            console.log("Koblet til Trimble Connect");
-        } catch (error) {
-            document.getElementById('status').innerText = "Feil ved tilkobling til SDK.";
+            // Bruker samme tilkoblingsmetode som tidligere prosjekter
+            API = await window.TrimbleConnectWorkspace.connect();
+            document.getElementById('status').innerText = "Tilkoblet Trimble Connect. Velg objekter og trykk kjør.";
+        } catch (e) {
+            console.error("Kunne ikke koble til SDK:", e);
+            document.getElementById('status').innerText = "Feil: Kunne ikke koble til Trimble Connect.";
         }
     }
 
-    document.getElementById('applyTexturesBtn').addEventListener('click', async () => {
+    document.getElementById('runBtn').addEventListener('click', async () => {
+        if (!API) return;
+
         const statusDiv = document.getElementById('status');
-        statusDiv.innerText = "Henter objekter...";
+        statusDiv.innerText = "Prosesserer valgte objekter...";
 
         try {
-            // 1. Hent de valgte objektene i vieweren
-            const selected = await workspace.ui.getSelection();
+            // Henter seleksjon via UI-modulen
+            const selection = await API.ui.getSelection();
             
-            if (selected.length === 0) {
-                statusDiv.innerText = "Ingen objekter er valgt.";
+            if (!selection || selection.length === 0) {
+                statusDiv.innerText = "Ingen objekter er valgt i modellen.";
                 return;
             }
 
-            for (const item of selected) {
-                // 2. Hent egenskaper for hvert objekt
-                // Merk: Vi antar her at vi ser etter en egenskap som heter "Materiale" eller "Beskrivelse"
-                const props = await workspace.model.getObjectProperties(item.modelId, item.expressId);
+            let count = 0;
+
+            for (const item of selection) {
+                // Henter egenskaper slik vi gjorde i siktlinje-verktøyet
+                const propertySets = await API.model.getObjectProperties(item.modelId, item.expressId);
                 
-                // Finn verdien vi skal mappe mot (eksempel: sjekker i alle egenskapssett)
-                let materialValue = null;
-                props.forEach(set => {
-                    const found = set.properties.find(p => p.name === "Materiale" || p.name === "Prosessnavn");
-                    if (found) materialValue = found.value;
-                });
+                let foundValue = null;
 
-                if (materialValue && textureMap[materialValue]) {
-                    const textureUrl = TEXTURE_BASE_URL + textureMap[materialValue];
-                    const materialId = "mat_" + materialValue;
+                // Itererer gjennom property sets for å finne relevant verdi (f.eks. V770 eller Prosesskode)
+                for (const set of propertySets) {
+                    for (const prop of set.properties) {
+                        // Sjekker mot vanlige egenskapsnavn i norske vegprosjekter
+                        if (prop.name === "Materiale" || prop.name === "Prosessnavn" || prop.name === "Objektnavn") {
+                            foundValue = prop.value;
+                            break;
+                        }
+                    }
+                    if (foundValue) break;
+                }
 
-                    // 3. Opprett materialet hvis det ikke finnes
-                    await workspace.viewer.materials.create({
-                        id: materialId,
+                if (foundValue && textureMap[foundValue]) {
+                    const textureUrl = TEXTURE_BASE_URL + textureMap[foundValue];
+                    const matId = "ext_mat_" + foundValue.replace(/\s+/g, '_');
+
+                    // Oppretter materialet i vieweren
+                    await API.viewer.materials.create({
+                        id: matId,
                         diffuseTexture: {
                             url: textureUrl,
-                            scale: { u: 0.1, v: 0.1 } // Juster skalaen her
+                            scale: { u: 0.05, v: 0.05 } // Justert skala for vegflater
                         }
                     });
 
-                    // 4. Påfør materialet på objektet
-                    await workspace.viewer.visual.setObjectsMaterial([item], materialId);
+                    // Påfører materialet
+                    await API.viewer.visual.setObjectsMaterial([item], matId);
+                    count++;
                 }
             }
 
-            statusDiv.innerText = "Fullført! Teksturer er lagt på.";
+            statusDiv.innerText = `Ferdig! Oppdaterte ${count} objekter med tekstur.`;
         } catch (err) {
-            console.error(err);
-            statusDiv.innerText = "Det oppstod en feil under prosessering.";
+            console.error("Feil under kjøring:", err);
+            statusDiv.innerText = "Det oppstod en teknisk feil. Sjekk konsollen.";
         }
     });
 
-    init();
+    // Start utvidelsen
+    initializeExtension();
 </script>
 
 </body>
