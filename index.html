@@ -17,7 +17,7 @@
 <body>
 
 <div class="card">
-    <h3>Tekstur-mapping v2.0</h3>
+    <h3>Tekstur-mapping v2.1</h3>
     <p>Regelbasert teksturering via JSON.</p>
     <button id="runBtn" disabled>Laster oppsett...</button>
     <div id="status">Laster ned tekstur-regler...</div>
@@ -28,7 +28,7 @@
     const MAPPING_URL = "https://raw.githubusercontent.com/vidmet/model-textures/main/mapping.json?t=" + new Date().getTime();
 
     let API = null;
-    let textureRules = {}; // Omdøpt for å reflektere at det nå er regler
+    let textureRules = {}; 
 
     async function initializeExtension() {
         const statusDiv = document.getElementById('status');
@@ -39,7 +39,7 @@
             if (!response.ok) throw new Error("Klarte ikke laste mapping.json");
             textureRules = await response.json();
 
-            API = await window.TrimbleConnectWorkspace.connect(window.parent);
+            API = await window.Trimble ConnectWorkspace.connect(window.parent);
             
             statusDiv.innerText = "Tilkoblet! Velg objekter og trykk kjør.";
             runBtn.innerText = "Kjør mapping";
@@ -57,7 +57,9 @@
         statusDiv.innerText = "Prosesserer valgte objekter...";
 
         try {
+            // Henter utvalget (returnerer et array med objekter gruppert pr. modell)
             const selection = await API.viewer.getSelection();
+            
             if (!selection || selection.length === 0) {
                 statusDiv.innerText = "Ingen objekter valgt.";
                 return;
@@ -65,59 +67,72 @@
 
             let count = 0;
 
-            for (const item of selection) {
-                const propertySets = await API.model.getObjectProperties(item.modelId, item.expressId);
-                
-                let foundTextureFile = null;
-                let matchedMaterialName = null;
+            // Gå gjennom hver modell vi har valgt objekter fra
+            for (const modelSelection of selection) {
+                const modelId = modelSelection.modelId;
+                const objectRuntimeIds = modelSelection.objectRuntimeIds;
 
-                // 1. Bla gjennom egenskapene til det valgte objektet i Trimble Connect
-                for (const set of propertySets) {
-                    for (const prop of set.properties) {
-                        const propName = prop.name;
-                        const propValue = String(prop.value); // Sikrer at tall blir til tekst
+                if (!objectRuntimeIds || objectRuntimeIds.length === 0) continue;
 
-                        // 2. Sjekk objektets egenskap mot reglene våre i JSON-filen
-                        for (const [materialName, ruleSet] of Object.entries(textureRules)) {
-                            
-                            // Har dette materialet regler for akkurat denne egenskapen? (f.eks. Prosesskode)
-                            if (ruleSet.properties && ruleSet.properties[propName]) {
-                                const allowedValues = ruleSet.properties[propName];
-                                
-                                // Er verdien på objektet en del av listen over tillatte verdier?
-                                if (Array.isArray(allowedValues) && allowedValues.includes(propValue)) {
-                                    foundTextureFile = ruleSet.texture;
-                                    matchedMaterialName = materialName; // F.eks. "Asfalt"
-                                    break;
+                // HER VAR DEN GAMLE FEILEN: Riktig metode for egenskaper er på API.viewer
+                const objectsProperties = await API.viewer.getObjectProperties(modelId, objectRuntimeIds);
+
+                // Gå gjennom egenskapene for hvert enkelt valgt objekt i denne modellen
+                for (const objProps of objectsProperties) {
+                    let foundTextureFile = null;
+                    let matchedMaterialName = null;
+
+                    if (objProps.properties) {
+                        for (const pSet of objProps.properties) {
+                            if (pSet.properties) {
+                                for (const prop of pSet.properties) {
+                                    const propName = prop.name;
+                                    const propValue = String(prop.value);
+
+                                    for (const [materialName, ruleSet] of Object.entries(textureRules)) {
+                                        if (ruleSet.properties && ruleSet.properties[propName]) {
+                                            const allowedValues = ruleSet.properties[propName];
+                                            if (Array.isArray(allowedValues) && allowedValues.includes(propValue)) {
+                                                foundTextureFile = ruleSet.texture;
+                                                matchedMaterialName = materialName;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if (foundTextureFile) break;
                                 }
                             }
+                            if (foundTextureFile) break;
                         }
-                        if (foundTextureFile) break; // Stopp hvis vi har funnet en match for denne egenskapen
                     }
-                    if (foundTextureFile) break; // Stopp hvis vi har funnet en match i dette property-settet
-                }
 
-                // 3. Påfør tekstur hvis en regel ble oppfylt
-                if (foundTextureFile && matchedMaterialName) {
-                    const textureUrl = TEXTURE_BASE_URL + foundTextureFile;
-                    const matId = "ext_mat_" + matchedMaterialName.replace(/\s+/g, '_');
+                    // Hvis vi fant en regel som passet, opprett og påfør materiale
+                    if (foundTextureFile && matchedMaterialName) {
+                        const textureUrl = TEXTURE_BASE_URL + foundTextureFile;
+                        const matId = "ext_mat_" + matchedMaterialName.replace(/\s+/g, '_');
 
-                    await API.viewer.materials.create({
-                        id: matId,
-                        diffuseTexture: {
-                            url: textureUrl,
-                            scale: { u: 0.05, v: 0.05 } 
-                        }
-                    });
+                        await API.viewer.materials.create({
+                            id: matId,
+                            diffuseTexture: {
+                                url: textureUrl,
+                                scale: { u: 0.05, v: 0.05 } 
+                            }
+                        });
 
-                    await API.viewer.visual.setObjectsMaterial([item], matId);
-                    count++;
+                        // Oppdaterer utseendet for nøyaktig dette objektet
+                        await API.viewer.visual.setObjectsMaterial([{
+                            modelId: modelId,
+                            objectRuntimeIds: [objProps.id]
+                        }], matId);
+                        
+                        count++;
+                    }
                 }
             }
 
             statusDiv.innerText = count > 0 
                 ? `Suksess! Oppdaterte ${count} objekter med tekstur.` 
-                : "Søket er ferdig, men ingen egenskaper på objektene matchet reglene i JSON-filen.";
+                : "Søket er ferdig, men ingen egenskaper matchet reglene i JSON-filen.";
 
         } catch (err) {
             statusDiv.innerText = "Det oppstod en feil: " + (err.message || err);
