@@ -17,7 +17,7 @@
 <body>
 
 <div class="card">
-    <h3>Tekstur-mapping v2.1</h3>
+    <h3>Tekstur-mapping v2.2</h3>
     <p>Regelbasert teksturering via JSON.</p>
     <button id="runBtn" disabled>Laster oppsett...</button>
     <div id="status">Laster ned tekstur-regler...</div>
@@ -35,21 +35,28 @@
         const runBtn = document.getElementById('runBtn');
 
         try {
+            console.log("1. Starter nedlasting av JSON...");
             const response = await fetch(MAPPING_URL);
-            if (!response.ok) throw new Error("Klarte ikke laste mapping.json");
-            textureRules = await response.json();
-
-            API = await window.Trimble ConnectWorkspace.connect(window.parent);
             
+            if (!response.ok) throw new Error("Fikk ikke lastet JSON. HTTP Status: " + response.status);
+            
+            console.log("2. Fikk svar fra GitHub, tolker JSON-data...");
+            textureRules = await response.json(); // Det er som regel HER usynlige tegn skaper krasj
+            
+            console.log("3. JSON er lest OK! Starter tilkobling til Trimble Connect...");
+            API = await window.TrimbleConnectWorkspace.connect(window.parent);
+            
+            console.log("4. Tilkobling vellykket!");
             statusDiv.innerText = "Tilkoblet! Velg objekter og trykk kjør.";
             runBtn.innerText = "Kjør mapping";
             runBtn.disabled = false;
 
         } catch (e) {
-            statusDiv.innerText = "Systemfeil under oppstart: " + (e.message || JSON.stringify(e));
+            console.error("KRASJ I OPPSTARTEN:", e);
+            statusDiv.innerText = "Feil under oppstart: " + e.message;
         }
     }
-
+    
     document.getElementById('runBtn').addEventListener('click', async () => {
         if (!API) return;
 
