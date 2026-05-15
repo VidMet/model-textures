@@ -2,7 +2,7 @@
 <html lang="no">
 <head>
     <meta charset="UTF-8">
-    <title>Tekstur-mapper for Trimble Connect</title>
+    <title>Farge-mapper for Trimble Connect</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background-color: #f4f4f4; margin: 0; }
@@ -17,46 +17,39 @@
 <body>
 
 <div class="card">
-    <h3>Tekstur-mapping v2.2</h3>
-    <p>Regelbasert teksturering via JSON.</p>
+    <h3>Farge-mapping v3.0</h3>
+    <p>Regelbasert fargelegging via JSON.</p>
     <button id="runBtn" disabled>Laster oppsett...</button>
-    <div id="status">Laster ned tekstur-regler...</div>
+    <div id="status">Laster ned regler...</div>
 </div>
 
 <script>
-    const TEXTURE_BASE_URL = "https://raw.githubusercontent.com/vidmet/model-textures/main/assets/";
+    // Din eksisterende mapping-URL
     const MAPPING_URL = "https://raw.githubusercontent.com/vidmet/model-textures/main/mapping.json?t=" + new Date().getTime();
 
     let API = null;
-    let textureRules = {}; 
+    let colorRules = {}; 
 
     async function initializeExtension() {
         const statusDiv = document.getElementById('status');
         const runBtn = document.getElementById('runBtn');
 
         try {
-            console.log("1. Starter nedlasting av JSON...");
             const response = await fetch(MAPPING_URL);
-            
-            if (!response.ok) throw new Error("Fikk ikke lastet JSON. HTTP Status: " + response.status);
-            
-            console.log("2. Fikk svar fra GitHub, tolker JSON-data...");
-            textureRules = await response.json(); // Det er som regel HER usynlige tegn skaper krasj
-            
-            console.log("3. JSON er lest OK! Starter tilkobling til Trimble Connect...");
+            if (!response.ok) throw new Error("Klarte ikke laste mapping.json");
+            colorRules = await response.json();
+
             API = await window.TrimbleConnectWorkspace.connect(window.parent);
             
-            console.log("4. Tilkobling vellykket!");
             statusDiv.innerText = "Tilkoblet! Velg objekter og trykk kjør.";
             runBtn.innerText = "Kjør mapping";
             runBtn.disabled = false;
 
         } catch (e) {
-            console.error("KRASJ I OPPSTARTEN:", e);
-            statusDiv.innerText = "Feil under oppstart: " + e.message;
+            statusDiv.innerText = "Systemfeil under oppstart: " + (e.message || JSON.stringify(e));
         }
     }
-    
+
     document.getElementById('runBtn').addEventListener('click', async () => {
         if (!API) return;
 
@@ -64,7 +57,6 @@
         statusDiv.innerText = "Prosesserer valgte objekter...";
 
         try {
-            // Henter utvalget (returnerer et array med objekter gruppert pr. modell)
             const selection = await API.viewer.getSelection();
             
             if (!selection || selection.length === 0) {
@@ -74,20 +66,17 @@
 
             let count = 0;
 
-            // Gå gjennom hver modell vi har valgt objekter fra
             for (const modelSelection of selection) {
                 const modelId = modelSelection.modelId;
                 const objectRuntimeIds = modelSelection.objectRuntimeIds;
 
                 if (!objectRuntimeIds || objectRuntimeIds.length === 0) continue;
 
-                // HER VAR DEN GAMLE FEILEN: Riktig metode for egenskaper er på API.viewer
+                // Henter egenskaper for de valgte objektene i modellen
                 const objectsProperties = await API.viewer.getObjectProperties(modelId, objectRuntimeIds);
 
-                // Gå gjennom egenskapene for hvert enkelt valgt objekt i denne modellen
                 for (const objProps of objectsProperties) {
-                    let foundTextureFile = null;
-                    let matchedMaterialName = null;
+                    let matchedColor = null;
 
                     if (objProps.properties) {
                         for (const pSet of objProps.properties) {
@@ -96,49 +85,41 @@
                                     const propName = prop.name;
                                     const propValue = String(prop.value);
 
-                                    for (const [materialName, ruleSet] of Object.entries(textureRules)) {
+                                    // Sjekker egenskapene opp mot JSON-filen
+                                    for (const [materialName, ruleSet] of Object.entries(colorRules)) {
                                         if (ruleSet.properties && ruleSet.properties[propName]) {
                                             const allowedValues = ruleSet.properties[propName];
                                             if (Array.isArray(allowedValues) && allowedValues.includes(propValue)) {
-                                                foundTextureFile = ruleSet.texture;
-                                                matchedMaterialName = materialName;
+                                                // Henter fargekoden i stedet for teksturfilen
+                                                matchedColor = ruleSet.color; 
                                                 break;
                                             }
                                         }
                                     }
-                                    if (foundTextureFile) break;
+                                    if (matchedColor) break;
                                 }
                             }
-                            if (foundTextureFile) break;
+                            if (matchedColor) break;
                         }
                     }
 
-                    // Hvis vi fant en regel som passet, opprett og påfør materiale
-                    if (foundTextureFile && matchedMaterialName) {
-                        const textureUrl = TEXTURE_BASE_URL + foundTextureFile;
-                        const matId = "ext_mat_" + matchedMaterialName.replace(/\s+/g, '_');
-
-                        await API.viewer.materials.create({
-                            id: matId,
-                            diffuseTexture: {
-                                url: textureUrl,
-                                scale: { u: 0.05, v: 0.05 } 
+                    // Hvis vi fant en regel, påfør fargen!
+                    if (matchedColor) {
+                        await API.viewer.setObjectState(
+                            { 
+                                modelObjectIds: [{ modelId: modelId, objectRuntimeIds: [objProps.id] }] 
+                            },
+                            { 
+                                color: matchedColor 
                             }
-                        });
-
-                        // Oppdaterer utseendet for nøyaktig dette objektet
-                        await API.viewer.visual.setObjectsMaterial([{
-                            modelId: modelId,
-                            objectRuntimeIds: [objProps.id]
-                        }], matId);
-                        
+                        );
                         count++;
                     }
                 }
             }
 
             statusDiv.innerText = count > 0 
-                ? `Suksess! Oppdaterte ${count} objekter med tekstur.` 
+                ? `Suksess! Oppdaterte fargen på ${count} objekter.` 
                 : "Søket er ferdig, men ingen egenskaper matchet reglene i JSON-filen.";
 
         } catch (err) {
