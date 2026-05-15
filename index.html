@@ -111,10 +111,11 @@
                 const propertySets = await API.model.getObjectProperties(item.modelId, item.expressId);
                 let foundValue = null;
 
-                // Let gjennom alle property sets etter en gjenkjennelig material/objekt-egenskap
+                // Let gjennom alle property sets etter en bestemt egenskap
                 for (const set of propertySets) {
                     for (const prop of set.properties) {
-                        if (prop.name === "Materiale" || prop.name === "Prosessnavn" || prop.name === "Objektnavn") {
+                        // HER definerer du nøyaktig hvilken egenskap koden skal se etter
+                        if (prop.name === "Objektkode V770" || prop.name === "Prosesskode") {
                             foundValue = prop.value;
                             break;
                         }
