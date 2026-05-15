@@ -1,21 +1,21 @@
 {
     "Asfalt": {
-        "texture": "T_Asphalt05.png",
+        "color": "#333333",
         "properties": {
-            "Prosesskode": ["64", "65"],
+            "Prosesskode": ["64", "65", "221.1"],
             "Objektkode V770": ["64000000", "65000000"],
-            "Materiale": ["Asfalt"]
+            "Materiale": ["Asfalt", "Slitelag"]
         }
     },
     "Betong": {
-        "texture": "T_Concrete01.png",
+        "color": "#888888",
         "properties": {
             "Prosesskode": ["332.2", "334.1"],
             "Materiale": ["Betong", "Plasstøpt betong"]
         }
     },
     "Gress": {
-        "texture": "T_Grass07.png",
+        "color": "#4CAF50",
         "properties": {
             "Materiale": ["Gras", "Gress"]
         }
