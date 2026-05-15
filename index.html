@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <title>Texture Mapper Extension</title>
+    <!-- Last inn Trimble Connect Workspace API -->
+    <script src="https://connect-extensions.trimble.com/sdk/3.0.0/trimble.connect.workspace.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 15px; color: #333; }
+        .container { display: flex; flex-direction: column; gap: 10px; }
+        button { 
+            padding: 10px; 
+            background-color: #0078d4; 
+            color: white; 
+            border: none; 
+            cursor: pointer; 
+            border-radius: 4px;
+        }
+        button:hover { background-color: #005a9e; }
+        #status { font-size: 0.9em; margin-top: 10px; color: #666; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h3>Tekstur-mapper</h3>
+    <p>Trykk på knappen for å legge teksturer på valgte objekter basert på egenskaper.</p>
+    <button id="applyTexturesBtn">Legg på teksturer</button>
+    <div id="status">Klar...</div>
+</div>
+
+<script>
+    // --- KONFIGURASJON ---
+    // Erstatt med din faktiske GitHub-sti (viktig: bruk raw.githubusercontent.com)
+    const TEXTURE_BASE_URL = "https://raw.githubusercontent.com/BRUKERNAVN/REPO/main/assets/";
+
+    // Mapping mellom egenskapsverdi og bildefil
+    const textureMap = {
+        "Asfalt": "asfalt_dark.jpg",
+        "Betong": "concrete_gray.jpg",
+        "Gras": "grass_green.jpg",
+        "Stein": "stone_wall.jpg"
+    };
+
+    let workspace = null;
+
+    // Initialiser Trimble Connect
+    async function init() {
+        try {
+            workspace = await window.TrimbleConnectWorkspace.connect();
+            console.log("Koblet til Trimble Connect");
+        } catch (error) {
+            document.getElementById('status').innerText = "Feil ved tilkobling til SDK.";
+        }
+    }
+
+    document.getElementById('applyTexturesBtn').addEventListener('click', async () => {
+        const statusDiv = document.getElementById('status');
+        statusDiv.innerText = "Henter objekter...";
+
+        try {
+            // 1. Hent de valgte objektene i vieweren
+            const selected = await workspace.ui.getSelection();
+            
+            if (selected.length === 0) {
+                statusDiv.innerText = "Ingen objekter er valgt.";
+                return;
+            }
+
+            for (const item of selected) {
+                // 2. Hent egenskaper for hvert objekt
+                // Merk: Vi antar her at vi ser etter en egenskap som heter "Materiale" eller "Beskrivelse"
+                const props = await workspace.model.getObjectProperties(item.modelId, item.expressId);
+                
+                // Finn verdien vi skal mappe mot (eksempel: sjekker i alle egenskapssett)
+                let materialValue = null;
+                props.forEach(set => {
+                    const found = set.properties.find(p => p.name === "Materiale" || p.name === "Prosessnavn");
+                    if (found) materialValue = found.value;
+                });
+
+                if (materialValue && textureMap[materialValue]) {
+                    const textureUrl = TEXTURE_BASE_URL + textureMap[materialValue];
+                    const materialId = "mat_" + materialValue;
+
+                    // 3. Opprett materialet hvis det ikke finnes
+                    await workspace.viewer.materials.create({
+                        id: materialId,
+                        diffuseTexture: {
+                            url: textureUrl,
+                            scale: { u: 0.1, v: 0.1 } // Juster skalaen her
+                        }
+                    });
+
+                    // 4. Påfør materialet på objektet
+                    await workspace.viewer.visual.setObjectsMaterial([item], materialId);
+                }
+            }
+
+            statusDiv.innerText = "Fullført! Teksturer er lagt på.";
+        } catch (err) {
+            console.error(err);
+            statusDiv.innerText = "Det oppstod en feil under prosessering.";
+        }
+    });
+
+    init();
+</script>
+
+</body>
+</html>
