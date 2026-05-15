@@ -2,106 +2,64 @@
 <html lang="no">
 <head>
     <meta charset="UTF-8">
-    <title>Texture Mapper Extension</title>
-    
-    <!-- Riktig SDK-lenke som matcher dine andre fungerende utvidelser -->
+    <title>Tekstur-mapper for Trimble Connect</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
-    
     <style>
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            padding: 20px; 
-            background-color: #f4f4f4; 
-            margin: 0;
-        }
-        .card { 
-            background: white; 
-            padding: 20px; 
-            border-radius: 8px; 
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
-        }
-        h3 { 
-            margin-top: 0; 
-            color: #0078d4; 
-        }
-        button { 
-            width: 100%;
-            padding: 12px; 
-            background-color: #0078d4; 
-            color: white; 
-            border: none; 
-            cursor: pointer; 
-            border-radius: 4px;
-            font-weight: bold;
-            transition: background-color 0.2s;
-        }
-        button:hover { 
-            background-color: #005a9e; 
-        }
-        #status { 
-            margin-top: 15px; 
-            font-size: 0.85em; 
-            color: #555; 
-            line-height: 1.4; 
-            padding: 10px;
-            background-color: #f9f9f9;
-            border-radius: 4px;
-            border: 1px solid #eee;
-        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background-color: #f4f4f4; margin: 0; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h3 { margin-top: 0; color: #0078d4; }
+        button { width: 100%; padding: 12px; background-color: #0078d4; color: white; border: none; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        button:hover { background-color: #005a9e; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        #status { margin-top: 15px; font-size: 0.85em; color: #555; padding: 10px; background-color: #f9f9f9; border-radius: 4px; border: 1px solid #eee; word-break: break-word; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <h3>Tekstur-mapping v1.04</h3>
-    <p>Legger tekstur på valgte objekter basert på egenskaper.</p>
-    <button id="runBtn">Kjør mapping</button>
-    <div id="status">Venter på tilkobling...</div>
+    <h3>Tekstur-mapping v2.0</h3>
+    <p>Regelbasert teksturering via JSON.</p>
+    <button id="runBtn" disabled>Laster oppsett...</button>
+    <div id="status">Laster ned tekstur-regler...</div>
 </div>
 
 <script>
-    // --- KONFIGURASJON ---
-    // GitHub Raw URL for teksturene. Sjekk at 'main' er riktig branch (eller bytt til 'master').
     const TEXTURE_BASE_URL = "https://raw.githubusercontent.com/vidmet/model-textures/main/assets/";
-
-    // Mapping mellom egenskapsverdi (f.eks. V770 / Objektnavn) og bildefil i repoet
-    const textureMap = {
-        "Asfalt": "T_Asphalt05.png",
-        "Betong": "concrete_gray.jpg",
-        "Gras": "grass_green.jpg",
-        "Skog": "forest_floor.jpg",
-        "Vann": "water_texture.jpg" // Legg til dine egne her
-    };
+    const MAPPING_URL = "https://raw.githubusercontent.com/vidmet/model-textures/main/mapping.json?t=" + new Date().getTime();
 
     let API = null;
+    let textureRules = {}; // Omdøpt for å reflektere at det nå er regler
 
-    // Initialiser utvidelsen
     async function initializeExtension() {
+        const statusDiv = document.getElementById('status');
+        const runBtn = document.getElementById('runBtn');
+
         try {
-            // Her er magien: vi sender med window.parent
+            const response = await fetch(MAPPING_URL);
+            if (!response.ok) throw new Error("Klarte ikke laste mapping.json");
+            textureRules = await response.json();
+
             API = await window.TrimbleConnectWorkspace.connect(window.parent);
-            document.getElementById('status').innerText = "Tilkoblet! Velg objekter i modellen og trykk kjør.";
+            
+            statusDiv.innerText = "Tilkoblet! Velg objekter og trykk kjør.";
+            runBtn.innerText = "Kjør mapping";
+            runBtn.disabled = false;
+
         } catch (e) {
-            document.getElementById('status').innerText = "Systemfeil ved tilkobling: " + (e.message || JSON.stringify(e) || "Ukjent feil");
-            console.error("SDK Connection Error:", e);
+            statusDiv.innerText = "Systemfeil under oppstart: " + (e.message || JSON.stringify(e));
         }
     }
 
-    // Hovedfunksjon som kjøres når knappen trykkes
     document.getElementById('runBtn').addEventListener('click', async () => {
-        if (!API) {
-            document.getElementById('status').innerText = "Venter fortsatt på tilkobling til modellen...";
-            return;
-        }
+        if (!API) return;
 
         const statusDiv = document.getElementById('status');
         statusDiv.innerText = "Prosesserer valgte objekter...";
 
         try {
-            const selection = await API.ui.getSelection();
-            
+            const selection = await API.viewer.getSelection();
             if (!selection || selection.length === 0) {
-                statusDiv.innerText = "Ingen objekter er valgt i modellen. Marker noe først.";
+                statusDiv.innerText = "Ingen objekter valgt.";
                 return;
             }
 
@@ -109,52 +67,64 @@
 
             for (const item of selection) {
                 const propertySets = await API.model.getObjectProperties(item.modelId, item.expressId);
-                let foundValue = null;
+                
+                let foundTextureFile = null;
+                let matchedMaterialName = null;
 
-                // Let gjennom alle property sets etter en bestemt egenskap
+                // 1. Bla gjennom egenskapene til det valgte objektet i Trimble Connect
                 for (const set of propertySets) {
                     for (const prop of set.properties) {
-                        // HER definerer du nøyaktig hvilken egenskap koden skal se etter
-                        if (prop.name === "Objektkode V770" || prop.name === "Prosesskode") {
-                            foundValue = prop.value;
-                            break;
+                        const propName = prop.name;
+                        const propValue = String(prop.value); // Sikrer at tall blir til tekst
+
+                        // 2. Sjekk objektets egenskap mot reglene våre i JSON-filen
+                        for (const [materialName, ruleSet] of Object.entries(textureRules)) {
+                            
+                            // Har dette materialet regler for akkurat denne egenskapen? (f.eks. Prosesskode)
+                            if (ruleSet.properties && ruleSet.properties[propName]) {
+                                const allowedValues = ruleSet.properties[propName];
+                                
+                                // Er verdien på objektet en del av listen over tillatte verdier?
+                                if (Array.isArray(allowedValues) && allowedValues.includes(propValue)) {
+                                    foundTextureFile = ruleSet.texture;
+                                    matchedMaterialName = materialName; // F.eks. "Asfalt"
+                                    break;
+                                }
+                            }
                         }
+                        if (foundTextureFile) break; // Stopp hvis vi har funnet en match for denne egenskapen
                     }
-                    if (foundValue) break;
+                    if (foundTextureFile) break; // Stopp hvis vi har funnet en match i dette property-settet
                 }
 
-                if (foundValue && textureMap[foundValue]) {
-                    const textureUrl = TEXTURE_BASE_URL + textureMap[foundValue];
-                    const matId = "ext_mat_" + foundValue.replace(/\s+/g, '_');
+                // 3. Påfør tekstur hvis en regel ble oppfylt
+                if (foundTextureFile && matchedMaterialName) {
+                    const textureUrl = TEXTURE_BASE_URL + foundTextureFile;
+                    const matId = "ext_mat_" + matchedMaterialName.replace(/\s+/g, '_');
 
-                    // Opprett materialet i vieweren hvis det ikke allerede finnes
                     await API.viewer.materials.create({
                         id: matId,
                         diffuseTexture: {
                             url: textureUrl,
-                            scale: { u: 0.05, v: 0.05 } // Juster denne for å endre størrelsen på teksturen
+                            scale: { u: 0.05, v: 0.05 } 
                         }
                     });
 
-                    // Påfør materialet på det aktuelle objektet
                     await API.viewer.visual.setObjectsMaterial([item], matId);
                     count++;
                 }
             }
 
-            if (count > 0) {
-                statusDiv.innerText = `Ferdig! Oppdaterte ${count} objekter med tekstur.`;
-            } else {
-                statusDiv.innerText = "Søket er ferdig, men ingen av de valgte objektene hadde egenskaper som matchet tekstur-tabellen.";
-            }
+            statusDiv.innerText = count > 0 
+                ? `Suksess! Oppdaterte ${count} objekter med tekstur.` 
+                : "Søket er ferdig, men ingen egenskaper på objektene matchet reglene i JSON-filen.";
 
         } catch (err) {
-            console.error("Feil under prosessering:", err);
-            statusDiv.innerText = "Det oppstod en teknisk feil under oppdatering av objektene. Sjekk konsollen (F12).";
+            statusDiv.innerText = "Det oppstod en feil: " + (err.message || err);
+            console.error(err);
         }
     });
 
-    // Start oppkoblingen når siden lastes
     initializeExtension();
 </script>
 
