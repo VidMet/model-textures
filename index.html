@@ -3,11 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <title>Texture Mapper Extension</title>
+    
+    <!-- Riktig SDK-lenke som matcher dine andre fungerende utvidelser -->
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+    
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background-color: #f4f4f4; }
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        h3 { margin-top: 0; color: #0078d4; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            padding: 20px; 
+            background-color: #f4f4f4; 
+            margin: 0;
+        }
+        .card { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+        }
+        h3 { 
+            margin-top: 0; 
+            color: #0078d4; 
+        }
         button { 
             width: 100%;
             padding: 12px; 
@@ -17,15 +33,27 @@
             cursor: pointer; 
             border-radius: 4px;
             font-weight: bold;
+            transition: background-color 0.2s;
         }
-        button:hover { background-color: #005a9e; }
-        #status { margin-top: 15px; font-size: 0.85em; color: #555; line-height: 1.4; }
+        button:hover { 
+            background-color: #005a9e; 
+        }
+        #status { 
+            margin-top: 15px; 
+            font-size: 0.85em; 
+            color: #555; 
+            line-height: 1.4; 
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            border: 1px solid #eee;
+        }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <h3>Tekstur-mapper</h3>
+    <h3>Tekstur-mapping v1.03</h3>
     <p>Legger tekstur på valgte objekter basert på egenskaper.</p>
     <button id="runBtn">Kjør mapping</button>
     <div id="status">Venter på tilkobling...</div>
@@ -33,56 +61,59 @@
 
 <script>
     // --- KONFIGURASJON ---
+    // GitHub Raw URL for teksturene. Sjekk at 'main' er riktig branch (eller bytt til 'master').
     const TEXTURE_BASE_URL = "https://raw.githubusercontent.com/vidmet/model-textures/main/assets/";
 
+    // Mapping mellom egenskapsverdi (f.eks. V770 / Objektnavn) og bildefil i repoet
     const textureMap = {
-        "Asfalt": "asfalt_dark.jpg",
+        "Asfalt": "T_Asphalt05.png",
         "Betong": "concrete_gray.jpg",
         "Gras": "grass_green.jpg",
-        "Skog": "forest_floor.jpg"
+        "Skog": "forest_floor.jpg",
+        "Vann": "water_texture.jpg" // Legg til dine egne her
     };
 
     let API = null;
 
-    // Initialisering slik vi har gjort det i tidligere utvidelser
+    // Initialiser utvidelsen
     async function initializeExtension() {
         try {
-            // Bruker samme tilkoblingsmetode som tidligere prosjekter
             API = await window.TrimbleConnectWorkspace.connect();
-            document.getElementById('status').innerText = "Tilkoblet Trimble Connect. Velg objekter og trykk kjør.";
+            document.getElementById('status').innerText = "Tilkoblet! Velg objekter i modellen og trykk kjør.";
+            console.log("Suksess: Koblet til Trimble Connect SDK");
         } catch (e) {
             console.error("Kunne ikke koble til SDK:", e);
-            document.getElementById('status').innerText = "Feil: Kunne ikke koble til Trimble Connect.";
+            document.getElementById('status').innerText = "Feil: Kunne ikke koble til Trimble Connect. Sjekk konsollen (F12).";
         }
     }
 
+    // Hovedfunksjon som kjøres når knappen trykkes
     document.getElementById('runBtn').addEventListener('click', async () => {
-        if (!API) return;
+        if (!API) {
+            document.getElementById('status').innerText = "Venter fortsatt på tilkobling til modellen...";
+            return;
+        }
 
         const statusDiv = document.getElementById('status');
         statusDiv.innerText = "Prosesserer valgte objekter...";
 
         try {
-            // Henter seleksjon via UI-modulen
             const selection = await API.ui.getSelection();
             
             if (!selection || selection.length === 0) {
-                statusDiv.innerText = "Ingen objekter er valgt i modellen.";
+                statusDiv.innerText = "Ingen objekter er valgt i modellen. Marker noe først.";
                 return;
             }
 
             let count = 0;
 
             for (const item of selection) {
-                // Henter egenskaper slik vi gjorde i siktlinje-verktøyet
                 const propertySets = await API.model.getObjectProperties(item.modelId, item.expressId);
-                
                 let foundValue = null;
 
-                // Itererer gjennom property sets for å finne relevant verdi (f.eks. V770 eller Prosesskode)
+                // Let gjennom alle property sets etter en gjenkjennelig material/objekt-egenskap
                 for (const set of propertySets) {
                     for (const prop of set.properties) {
-                        // Sjekker mot vanlige egenskapsnavn i norske vegprosjekter
                         if (prop.name === "Materiale" || prop.name === "Prosessnavn" || prop.name === "Objektnavn") {
                             foundValue = prop.value;
                             break;
@@ -95,29 +126,34 @@
                     const textureUrl = TEXTURE_BASE_URL + textureMap[foundValue];
                     const matId = "ext_mat_" + foundValue.replace(/\s+/g, '_');
 
-                    // Oppretter materialet i vieweren
+                    // Opprett materialet i vieweren hvis det ikke allerede finnes
                     await API.viewer.materials.create({
                         id: matId,
                         diffuseTexture: {
                             url: textureUrl,
-                            scale: { u: 0.05, v: 0.05 } // Justert skala for vegflater
+                            scale: { u: 0.05, v: 0.05 } // Juster denne for å endre størrelsen på teksturen
                         }
                     });
 
-                    // Påfører materialet
+                    // Påfør materialet på det aktuelle objektet
                     await API.viewer.visual.setObjectsMaterial([item], matId);
                     count++;
                 }
             }
 
-            statusDiv.innerText = `Ferdig! Oppdaterte ${count} objekter med tekstur.`;
+            if (count > 0) {
+                statusDiv.innerText = `Ferdig! Oppdaterte ${count} objekter med tekstur.`;
+            } else {
+                statusDiv.innerText = "Søket er ferdig, men ingen av de valgte objektene hadde egenskaper som matchet tekstur-tabellen.";
+            }
+
         } catch (err) {
-            console.error("Feil under kjøring:", err);
-            statusDiv.innerText = "Det oppstod en teknisk feil. Sjekk konsollen.";
+            console.error("Feil under prosessering:", err);
+            statusDiv.innerText = "Det oppstod en teknisk feil under oppdatering av objektene. Sjekk konsollen (F12).";
         }
     });
 
-    // Start utvidelsen
+    // Start oppkoblingen når siden lastes
     initializeExtension();
 </script>
 
