@@ -1,0 +1,23 @@
+{
+    "Asfalt": {
+        "texture": "T_Asphalt05.png",
+        "properties": {
+            "Prosesskode": ["64", "65"],
+            "Objektkode V770": ["64000000", "65000000"],
+            "Materiale": ["Asfalt"]
+        }
+    },
+    "Betong": {
+        "texture": "T_Concrete01.png",
+        "properties": {
+            "Prosesskode": ["332.2", "334.1"],
+            "Materiale": ["Betong", "Plasstøpt betong"]
+        }
+    },
+    "Gress": {
+        "texture": "T_Grass07.png",
+        "properties": {
+            "Materiale": ["Gras", "Gress"]
+        }
+    }
+}
