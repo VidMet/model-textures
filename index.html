@@ -78,12 +78,12 @@
     // Initialiser utvidelsen
     async function initializeExtension() {
         try {
-            API = await window.TrimbleConnectWorkspace.connect();
+            // Her er magien: vi sender med window.parent
+            API = await window.TrimbleConnectWorkspace.connect(window.parent);
             document.getElementById('status').innerText = "Tilkoblet! Velg objekter i modellen og trykk kjør.";
-            console.log("Suksess: Koblet til Trimble Connect SDK");
         } catch (e) {
-            console.error("Kunne ikke koble til SDK:", e);
-            document.getElementById('status').innerText = "Feil: Kunne ikke koble til Trimble Connect. Sjekk konsollen (F12).";
+            document.getElementById('status').innerText = "Systemfeil ved tilkobling: " + (e.message || JSON.stringify(e) || "Ukjent feil");
+            console.error("SDK Connection Error:", e);
         }
     }
 
