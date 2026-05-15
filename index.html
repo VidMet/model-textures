@@ -17,14 +17,13 @@
 <body>
 
 <div class="card">
-    <h3>Farge-mapping v3.0</h3>
+    <h3>Farge-mapping v3.1</h3>
     <p>Regelbasert fargelegging via JSON.</p>
     <button id="runBtn" disabled>Laster oppsett...</button>
     <div id="status">Laster ned regler...</div>
 </div>
 
 <script>
-    // Din eksisterende mapping-URL
     const MAPPING_URL = "https://raw.githubusercontent.com/vidmet/model-textures/main/mapping.json?t=" + new Date().getTime();
 
     let API = null;
@@ -72,7 +71,6 @@
 
                 if (!objectRuntimeIds || objectRuntimeIds.length === 0) continue;
 
-                // Henter egenskaper for de valgte objektene i modellen
                 const objectsProperties = await API.viewer.getObjectProperties(modelId, objectRuntimeIds);
 
                 for (const objProps of objectsProperties) {
@@ -82,19 +80,31 @@
                         for (const pSet of objProps.properties) {
                             if (pSet.properties) {
                                 for (const prop of pSet.properties) {
-                                    const propName = prop.name;
-                                    const propValue = String(prop.value);
+                                    // Vasker egenskapsnavn og verdi fra modellen
+                                    const cleanPropName = String(prop.name).trim().toLowerCase();
+                                    const cleanPropValue = String(prop.value).trim().toLowerCase();
 
-                                    // Sjekker egenskapene opp mot JSON-filen
+                                    // Sjekker mot den nedlastede JSON-filen
                                     for (const [materialName, ruleSet] of Object.entries(colorRules)) {
-                                        if (ruleSet.properties && ruleSet.properties[propName]) {
-                                            const allowedValues = ruleSet.properties[propName];
-                                            if (Array.isArray(allowedValues) && allowedValues.includes(propValue)) {
-                                                // Henter fargekoden i stedet for teksturfilen
-                                                matchedColor = ruleSet.color; 
-                                                break;
+                                        if (ruleSet.properties) {
+                                            for (const [ruleKey, allowedValues] of Object.entries(ruleSet.properties)) {
+                                                
+                                                // Sammenligner vasket egenskapsnavn
+                                                if (ruleKey.trim().toLowerCase() === cleanPropName) {
+                                                    
+                                                    // Sjekker om modell-verdien finnes i listen vår, vasket for mellomrom og store/små bokstaver
+                                                    const isMatch = allowedValues.some(val => 
+                                                        String(val).trim().toLowerCase() === cleanPropValue
+                                                    );
+                                                    
+                                                    if (isMatch) {
+                                                        matchedColor = ruleSet.color;
+                                                        break;
+                                                    }
+                                                }
                                             }
                                         }
+                                        if (matchedColor) break;
                                     }
                                     if (matchedColor) break;
                                 }
@@ -103,7 +113,6 @@
                         }
                     }
 
-                    // Hvis vi fant en regel, påfør fargen!
                     if (matchedColor) {
                         await API.viewer.setObjectState(
                             { 
